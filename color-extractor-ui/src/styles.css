@@ -1,0 +1,38 @@
+/* Global styles */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f4f7f6;
+  color: #333;
+  line-height: 1.6;
+}
+
+.main-content {
+  padding: 20px;
+}
+
+/* You can add more global styles here, for example:
+   - Basic typography
+   - Link styling
+   - Reset some default browser styles if needed
+*/
+
+/* Example of a global reset/normalize (very basic) */
+* {
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 0;
+}
+
+/* Centering the app content if needed, though component handles its own max-width */
+/* app-root > .main-content could also be a target if app.component.html has a wrapper */
+/* For now, this is simple. The component itself has a max-width container. */
+/* If ColorInputDisplayComponent wasn't wrapped in a main tag in app.component.html,
+   you might target app-root directly or its child for global layout. */
+/* Since app.component.html is just <main><app-color-input-display></app-color-input-display></main>,
+   these styles apply to the body and the .main-content class if used within app.component.html.
+   The current app.component.html uses main-content, which is fine.
+*/

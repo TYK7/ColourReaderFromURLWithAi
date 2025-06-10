@@ -1,0 +1,45 @@
+<div class="container">
+  <h2>Color Scheme Identifier</h2>
+  <div class="input-group">
+    <input type="text" [(ngModel)]="url" placeholder="Enter website URL (e.g., https://www.example.com)">
+    <button (click)="extractColors()" [disabled]="isLoading">
+      <span *ngIf="!isLoading">Extract Colors</span>
+      <span *ngIf="isLoading">Loading...</span>
+    </button>
+  </div>
+
+  <div *ngIf="isLoading" class="loading-indicator">
+    <p>Extracting colors, please wait...</p>
+    <!-- You can add a spinner animation here later -->
+  </div>
+
+  <div *ngIf="errorMessage" class="error-message">
+    <p>Error: {{ errorMessage }}</p>
+  </div>
+
+  <div *ngIf="!isLoading && colors.length > 0 && !errorMessage" class="results-container">
+    <h3>Top Extracted Colors (by frequency):</h3>
+    <div class="color-grid">
+      <div *ngFor="let color of colors" class="color-item">
+        <!-- Display item-specific error if present -->
+        <div *ngIf="color.error" class="color-item-error">
+          <p>Could not process for source: {{color.source}}</p>
+          <p>Error: {{color.error}}</p>
+        </div>
+        <ng-container *ngIf="!color.error">
+          <div class.bind="color-swatch" [style.background-color]="color.hexValue || color.rgbValue || color.name"></div>
+          <div class="color-details">
+            <p><strong>HEX:</strong> {{ color.hexValue || 'N/A' }}</p>
+            <p><strong>RGB:</strong> {{ color.rgbValue || 'N/A' }}</p>
+            <p><strong>Name:</strong> {{ color.name || 'N/A' }}</p>
+            <p><em>Source:</strong> {{ color.source }}</em></p>
+          </div>
+        </ng-container>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="!isLoading && !errorMessage && colors.length === 0 && submitted" class="no-results">
+    <p>No colors extracted or the URL did not yield any results. Please ensure the URL is correct and publicly accessible.</p>
+  </div>
+</div>

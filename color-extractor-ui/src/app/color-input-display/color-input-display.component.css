@@ -1,0 +1,120 @@
+.container {
+  max-width: 800px;
+  margin: 20px auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+h2 {
+  text-align: center;
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.input-group {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.input-group input[type="text"] {
+  flex-grow: 1;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+.input-group button {
+  padding: 10px 20px;
+  font-size: 16px;
+  color: white;
+  background-color: #007bff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.input-group button:hover {
+  background-color: #0056b3;
+}
+
+.input-group button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.loading-indicator, .error-message, .no-results {
+  text-align: center;
+  padding: 15px;
+  margin-top: 20px;
+  border-radius: 4px;
+}
+
+.loading-indicator {
+  color: #007bff;
+  background-color: #e7f3ff;
+  border: 1px solid #b3d7ff;
+}
+
+.error-message {
+  color: #D8000C;
+  background-color: #FFD2D2;
+  border: 1px solid #FFB8B8;
+}
+
+.no-results {
+  color: #333;
+  background-color: #f0f0f0;
+  border: 1px solid #ddd;
+}
+
+.results-container {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.results-container h3 {
+  text-align: center;
+  color: #333;
+  margin-bottom: 20px;
+}
+
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+}
+
+.color-item {
+  border: 1px solid #eee;
+  border-radius: 4px;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.color-swatch {
+  width: 100px;
+  height: 100px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.color-info p {
+  margin: 5px 0;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.color-info p strong {
+  color: #555;
+}
