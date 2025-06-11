@@ -1,13 +1,8 @@
 import { Component } from '@angular/core';
 import { FormsModule } from '@angular/forms'; // Import FormsModule
 import { CommonModule } from '@angular/common'; // Import CommonModule for *ngIf, *ngFor etc.
-
-interface ColorInfo {
-  hexValue?: string;
-  rgbValue?: string;
-  name?: string;
-  source?: string;
-}
+import { ColorInfo } from '../color-info'; // Import the ColorInfo interface
+import { ColorExtractionApiService } from '../color-extraction-api.service'; // Assuming this is the correct path
 
 @Component({
   selector: 'app-color-input-display',
@@ -21,7 +16,8 @@ interface ColorInfo {
 })
 export class ColorInputDisplayComponent {
   url: string = '';
-  colors: ColorInfo[] = [];
+  logoColors: ColorInfo[] = [];
+  websiteColors: ColorInfo[] = [];
   isLoading: boolean = false;
   errorMessage: string = '';
   submitted: boolean = false; // To track if extraction has been attempted
@@ -31,20 +27,23 @@ export class ColorInputDisplayComponent {
   extractColors() {
     this.isLoading = true;
     this.errorMessage = '';
-    this.colors = [];
+    this.logoColors = [];
+    this.websiteColors = [];
     this.submitted = true; // Mark that a submission attempt was made
     console.log('URL submitted:', this.url);
 
     if (!this.url || this.url.trim() === '') {
       this.errorMessage = 'URL cannot be empty. Please enter a valid URL.';
       this.isLoading = false;
-      this.colors = [];
+      this.logoColors = [];
+      this.websiteColors = [];
       return;
     }
     if (!this.isValidUrl(this.url)) {
       this.errorMessage = 'Invalid URL format. Please include http:// or https:// and a valid domain.';
       this.isLoading = false;
-      this.colors = [];
+      this.logoColors = [];
+      this.websiteColors = [];
       return;
     }
 
@@ -52,18 +51,25 @@ export class ColorInputDisplayComponent {
     this.colorApiService.extractColors(this.url).subscribe({
       next: (data) => {
         this.isLoading = false;
+        this.logoColors = []; // Clear previous results
+        this.websiteColors = []; // Clear previous results
+
         if (data && data.length > 0 && data[0].error) {
           // This handles errors returned in the ColorInfo structure,
           // including those from frontend validation in service, backend validation (400), or server errors (500)
           // that the service formats into ColorInfo[].
           this.errorMessage = data[0].error;
-          this.colors = [];
         } else if (data && data.length === 0) {
-          this.colors = [];
           // This is the "No distinct colors found" scenario
           this.errorMessage = 'No distinct colors were found on this page. The page might have no parsable colors or uses complex CSS/JS rendering not supported by this tool.';
-        } else {
-          this.colors = data;
+        } else if (data) {
+          data.forEach(color => {
+            if (color.isLogoColor === true) {
+              this.logoColors.push(color);
+            } else {
+              this.websiteColors.push(color);
+            }
+          });
           this.errorMessage = ''; // Clear any previous error messages
         }
       },
@@ -74,7 +80,8 @@ export class ColorInputDisplayComponent {
         // Our current service design aims to always return Observable<ColorInfo[]> via of().
         this.isLoading = false;
         this.errorMessage = `An critical client-side error occurred: ${err.message || 'Unknown error. Check console.'}`;
-        this.colors = [];
+        this.logoColors = [];
+        this.websiteColors = [];
         console.error('Critical error subscribing to colorApiService:', err);
       },
       complete: () => {
