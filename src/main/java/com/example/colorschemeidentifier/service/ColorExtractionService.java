@@ -60,6 +60,15 @@ public class ColorExtractionService {
             logger.info("Found {} unique image URLs to analyze.", imageUrls.size());
             extractColorsFromImages(imageUrls, colorFrequencies);
 
+            // Extract colors from logo
+            String logoUrl = extractLogoUrl(doc, baseUrl);
+            if (logoUrl != null) {
+                logger.info("Found logo URL: {}", logoUrl);
+                Set<String> logoUrlSet = new HashSet<>();
+                logoUrlSet.add(logoUrl);
+                extractColorsFromLogoImage(logoUrlSet, colorFrequencies);
+            }
+
         } catch (IOException e) {
             logger.error("Error fetching or parsing URL {}: {}", urlString, e.getMessage());
             return List.of(new ColorInfo(null, null, "Error processing URL: " + e.getMessage(), "system_error"));
@@ -78,6 +87,60 @@ public class ColorExtractionService {
         return sortedByFrequency.stream()
                                 .map(ColorFrequencyInfo::getColorInfo)
                                 .collect(Collectors.toList());
+    }
+
+    private String extractLogoUrl(Document doc, String baseUrl) {
+        // Attempt 1: Look for <link rel="icon" href="..."> or <link rel="shortcut icon" href="...">
+        Elements iconLinks = doc.select("link[rel=icon], link[rel~=(?i)shortcut icon]");
+        if (!iconLinks.isEmpty()) {
+            String logoUrl = iconLinks.first().absUrl("href");
+            if (!logoUrl.isEmpty()) {
+                logger.info("Found logo via <link rel='icon'>: {}", logoUrl);
+                return logoUrl;
+            }
+        }
+
+        // Attempt 2: Look for <img> tags with alt or id attributes containing "logo"
+        Elements logoImages = doc.select("img[alt*=logo], img[id*=logo]");
+        if (!logoImages.isEmpty()) {
+            String logoUrl = logoImages.first().absUrl("src");
+            if (!logoUrl.isEmpty() && isSupportedImageUrl(logoUrl)) { // Check if it's a valid image
+                 logger.info("Found logo via <img> tag (alt/id*='logo'): {}", logoUrl);
+                return logoUrl;
+            }
+        }
+
+        // Attempt 3: Look for <img> tags with class attributes containing "logo" (common practice)
+        logoImages = doc.select("img[class*=logo]");
+        if (!logoImages.isEmpty()) {
+            String logoUrl = logoImages.first().absUrl("src");
+            if (!logoUrl.isEmpty() && isSupportedImageUrl(logoUrl)) {
+                logger.info("Found logo via <img> tag (class*='logo'): {}", logoUrl);
+                return logoUrl;
+            }
+        }
+
+        // Attempt 4: Check for a favicon.ico at the website's root
+        try {
+            URL base = new URL(baseUrl);
+            URL faviconUrl = new URL(base.getProtocol(), base.getHost(), base.getPort(), "/favicon.ico");
+            HttpURLConnection connection = (HttpURLConnection) faviconUrl.openConnection();
+            connection.setRequestMethod("HEAD");
+            connection.setConnectTimeout(3000); // Short timeout for favicon check
+            connection.setReadTimeout(3000);
+            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                String contentType = connection.getContentType();
+                if (contentType != null && contentType.startsWith("image")) {
+                    logger.info("Found logo via /favicon.ico: {}", faviconUrl.toString());
+                    return faviconUrl.toString();
+                }
+            }
+        } catch (IOException e) {
+            logger.debug("Error checking for /favicon.ico at {}: {}", baseUrl, e.getMessage());
+        }
+
+        logger.info("No specific logo URL found for {}.", baseUrl);
+        return null;
     }
 
     private void addOrUpdateColorFrequency(Map<String, ColorFrequencyInfo> colorFrequencies, ColorInfo colorInfo) {
@@ -116,14 +179,37 @@ public class ColorExtractionService {
         }
 
         // Ensure ColorInfo has the most accurate info we've derived
-        final ColorInfo updatedColorInfo = new ColorInfo(hex, rgb, name, colorInfo.getSource());
+        // Use the isLogoColor flag from the incoming colorInfo
+        final ColorInfo newColorInfoData = new ColorInfo(hex, rgb, name, colorInfo.getSource(), colorInfo.isLogoColor());
 
         ColorFrequencyInfo cfInfo = colorFrequencies.get(key);
         if (cfInfo == null) {
-            colorFrequencies.put(key, new ColorFrequencyInfo(updatedColorInfo));
+            // When adding a new color, use the newColorInfoData which includes the isLogoColor flag
+            colorFrequencies.put(key, new ColorFrequencyInfo(newColorInfoData));
         } else {
-            // Optionally, update the ColorInfo in cfInfo if the new one is "better" (e.g., has a source from CSS rather than image)
-            // For now, just increment frequency. The first ColorInfo encountered for a key is kept.
+            // If the existing color is not marked as logo color, but the new one is, update the flag.
+            if (newColorInfoData.isLogoColor() && !cfInfo.getColorInfo().isLogoColor()) {
+                cfInfo.getColorInfo().setLogoColor(true);
+                // If source was from a generic image, and this one is from a logo, update source
+                // Also check if the new source is more specific (e.g. logo: vs image:)
+                if (cfInfo.getColorInfo().getSource() != null &&
+                    (cfInfo.getColorInfo().getSource().startsWith("image:") || cfInfo.getColorInfo().getSource().startsWith("css_file:") || cfInfo.getColorInfo().getSource().startsWith("inline_style_attribute:")) &&
+                    newColorInfoData.getSource() != null && newColorInfoData.getSource().startsWith("logo:")) {
+                    cfInfo.getColorInfo().setSource(newColorInfoData.getSource());
+                }
+            }
+            // If the existing color IS a logo color, but the new one isn't, we keep it as a logo color.
+            // If both are logo colors, or both are not, no change to the flag is needed.
+
+            // Always update hex and rgb if the existing one doesn't have it and the new one does.
+            // This can happen if a color was first seen by name, then later by hex/rgb.
+            if (cfInfo.getColorInfo().getHexValue() == null && newColorInfoData.getHexValue() != null) {
+                cfInfo.getColorInfo().setHexValue(newColorInfoData.getHexValue());
+            }
+            if (cfInfo.getColorInfo().getRgbValue() == null && newColorInfoData.getRgbValue() != null) {
+                cfInfo.getColorInfo().setRgbValue(newColorInfoData.getRgbValue());
+            }
+
             cfInfo.incrementFrequency();
         }
     }
@@ -343,6 +429,54 @@ public class ColorExtractionService {
     }
 
     private void extractDominantColorsFromImage(BufferedImage image, Map<String, ColorFrequencyInfo> colorFrequencies, String sourceUrl) {
+        // Calls the internal method, defaulting isLogoColor to false for regular images
+        extractDominantColorsFromImageInternal(image, colorFrequencies, sourceUrl, false);
+    }
+
+    private void extractColorsFromLogoImage(Set<String> logoUrlSet, Map<String, ColorFrequencyInfo> colorFrequencies) {
+        // This method is simplified as it expects only one URL and processes it as a logo.
+        if (logoUrlSet == null || logoUrlSet.isEmpty()) {
+            logger.warn("Logo URL set is null or empty.");
+            return;
+        }
+        String logoUrl = logoUrlSet.iterator().next(); // Get the single logo URL
+        if (logoUrl == null || logoUrl.trim().isEmpty()) {
+            logger.warn("Logo URL is null or empty.");
+            return;
+        }
+
+        String sourceIdentifier = logoUrl.startsWith("data:image")
+                ? "logo_data_uri:" + logoUrl.substring(0, Math.min(logoUrl.length(), 50)) + "..."
+                : "logo:" + logoUrl;
+        try {
+            InputStream imageStream = logoUrl.startsWith("data:image")
+                    ? processDataUriGetStream(logoUrl, sourceIdentifier)
+                    : openConnectionAndGetStream(logoUrl);
+
+            if (imageStream == null) {
+                logger.warn("Could not get input stream for logo URL: {}", logoUrl);
+                return;
+            }
+
+            try (InputStream in = imageStream) { // Ensure stream is closed
+                BufferedImage image = ImageIO.read(in);
+                if (image != null) {
+                    logger.info("Processing logo image: {}", sourceIdentifier);
+                    // Calls the internal method, setting isLogoColor to true
+                    extractDominantColorsFromImageInternal(image, colorFrequencies, sourceIdentifier, true);
+                } else {
+                    logger.warn("Could not decode logo image from source: {}", sourceIdentifier);
+                }
+            }
+        } catch (IOException e) {
+            logger.error("Error reading logo image stream for {}: {}", sourceIdentifier, e.getMessage());
+        } catch (Exception e) {
+            logger.error("An unexpected error occurred while processing logo image {}: {}", sourceIdentifier, e.getMessage(), e);
+        }
+    }
+
+    // Internal method to handle dominant color extraction, now with isLogoColor flag
+    private void extractDominantColorsFromImageInternal(BufferedImage image, Map<String, ColorFrequencyInfo> colorFrequencies, String sourceUrl, boolean isLogoColor) {
         int width = image.getWidth();
         int height = image.getHeight();
         final int MAX_DIMENSION = 100;
@@ -373,8 +507,16 @@ public class ColorExtractionService {
 
                 String hex = String.format("#%02X%02X%02X", qR, qG, qB);
                 String rgbStr = String.format("rgb(%d, %d, %d)", qR, qG, qB);
+                // Source prefix is now determined by the sourceUrl itself if it's specific enough (e.g. "logo:")
+                // or defaults to "image:" if not. The isLogoColor flag is the primary determinant.
+                String finalSource = sourceUrl; // sourceUrl should already be prefixed (e.g. "logo:http..." or "image:http...")
+                if (isLogoColor && !finalSource.startsWith("logo:")) { // defensive, should be prefixed by caller
+                    finalSource = "logo:" + sourceUrl;
+                } else if (!isLogoColor && !finalSource.startsWith("image:")) { // defensive
+                    finalSource = "image:" + sourceUrl;
+                }
 
-                addOrUpdateColorFrequency(colorFrequencies, new ColorInfo(hex, rgbStr, hex, "image:" + sourceUrl));
+                addOrUpdateColorFrequency(colorFrequencies, new ColorInfo(hex, rgbStr, hex, finalSource, isLogoColor));
             }
         }
     }

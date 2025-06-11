@@ -17,17 +17,41 @@
     <p>Error: {{ errorMessage }}</p>
   </div>
 
-  <div *ngIf="!isLoading && colors.length > 0 && !errorMessage" class="results-container">
-    <h3>Top Extracted Colors (by frequency):</h3>
+  <!-- Logo Colors Section -->
+  <div *ngIf="!isLoading && logoColors.length > 0 && !errorMessage" class="results-container logo-colors-container">
+    <h3>Logo Colors:</h3>
     <div class="color-grid">
-      <div *ngFor="let color of colors" class="color-item">
+      <div *ngFor="let color of logoColors" class="color-item">
+        <ng-container *ngIf="!color.error">
+          <div class="color-swatch" [style.background-color]="color.hexValue || color.rgbValue || color.name"></div>
+          <div class="color-details">
+            <p><strong>HEX:</strong> {{ color.hexValue || 'N/A' }}</p>
+            <p><strong>RGB:</strong> {{ color.rgbValue || 'N/A' }}</p>
+            <p><strong>Name:</strong> {{ color.name || 'N/A' }}</p>
+            <p><em>Source:</strong> {{ color.source }}</em></p>
+          </div>
+        </ng-container>
+        <!-- Display item-specific error if present (though less likely for logo if it's a single image) -->
+        <div *ngIf="color.error" class="color-item-error">
+          <p>Could not process logo color for source: {{color.source}}</p>
+          <p>Error: {{color.error}}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Website Palette Colors Section -->
+  <div *ngIf="!isLoading && websiteColors.length > 0 && !errorMessage" class="results-container website-colors-container">
+    <h3>Website Palette Colors:</h3>
+    <div class="color-grid">
+      <div *ngFor="let color of websiteColors" class="color-item">
         <!-- Display item-specific error if present -->
         <div *ngIf="color.error" class="color-item-error">
           <p>Could not process for source: {{color.source}}</p>
           <p>Error: {{color.error}}</p>
         </div>
         <ng-container *ngIf="!color.error">
-          <div class.bind="color-swatch" [style.background-color]="color.hexValue || color.rgbValue || color.name"></div>
+          <div class="color-swatch" [style.background-color]="color.hexValue || color.rgbValue || color.name"></div>
           <div class="color-details">
             <p><strong>HEX:</strong> {{ color.hexValue || 'N/A' }}</p>
             <p><strong>RGB:</strong> {{ color.rgbValue || 'N/A' }}</p>
@@ -39,7 +63,7 @@
     </div>
   </div>
 
-  <div *ngIf="!isLoading && !errorMessage && colors.length === 0 && submitted" class="no-results">
+  <div *ngIf="!isLoading && !errorMessage && logoColors.length === 0 && websiteColors.length === 0 && submitted" class="no-results">
     <p>No colors extracted or the URL did not yield any results. Please ensure the URL is correct and publicly accessible.</p>
   </div>
 </div>

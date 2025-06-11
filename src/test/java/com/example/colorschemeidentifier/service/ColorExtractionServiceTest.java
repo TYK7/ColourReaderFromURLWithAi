@@ -30,6 +30,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
+
+
 @ExtendWith(MockitoExtension.class)
 public class ColorExtractionServiceTest {
 
@@ -41,14 +47,250 @@ public class ColorExtractionServiceTest {
 
     // Test data
     private final String TEST_URL = "http://example.com";
+    private final String TEST_BASE_URL = "http://example.com/";
+
+
+    // Helper method to invoke private methods for testing
+    private <T> T invokePrivateMethod(Object obj, String methodName, Class<?>[] paramTypes, Object[] params) throws Exception {
+        Method method = obj.getClass().getDeclaredMethod(methodName, paramTypes);
+        method.setAccessible(true);
+        return (T) method.invoke(obj, params);
+    }
 
     @BeforeEach
     void setUp() {
         // Reset mocks or setup default behaviors if necessary
     }
 
+    // Tests for extractLogoUrl
+    @Test
+    void extractLogoUrl_findsLinkRelIcon() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockIconLinks = new Elements();
+        Element mockLinkElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockIconLinks);
+        when(mockLinkElement.absUrl("href")).thenReturn(TEST_BASE_URL + "icon.png");
+        mockIconLinks.add(mockLinkElement);
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "icon.png", logoUrl);
+    }
+
+    @Test
+    void extractLogoUrl_findsShortcutIcon() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockIconLinks = new Elements();
+        Element mockLinkElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockIconLinks);
+        when(mockLinkElement.absUrl("href")).thenReturn(TEST_BASE_URL + "shortcut.ico");
+        mockIconLinks.add(mockLinkElement);
+        // simulate no other logo types found
+        when(mockDoc.select("img[alt*=logo], img[id*=logo]")).thenReturn(new Elements());
+        when(mockDoc.select("img[class*=logo]")).thenReturn(new Elements());
+
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "shortcut.ico", logoUrl);
+    }
+
+    @Test
+    void extractLogoUrl_findsImgAltLogo() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockEmptyIconLinks = new Elements();
+        Elements mockLogoImgs = new Elements();
+        Element mockImgElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockEmptyIconLinks);
+        when(mockDoc.select("img[alt*=logo], img[id*=logo]")).thenReturn(mockLogoImgs);
+        when(mockImgElement.absUrl("src")).thenReturn(TEST_BASE_URL + "alt_logo.png");
+        mockLogoImgs.add(mockImgElement);
+        // Mock isSupportedImageUrl to return true for this URL
+        // This is tricky as isSupportedImageUrl is private.
+        // For this test, we assume it would return true for a .png.
+        // If isSupportedImageUrl was more complex, it would need its own test or different mocking.
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "alt_logo.png", logoUrl);
+    }
+
+    @Test
+    void extractLogoUrl_findsImgIdLogo() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockEmptyIconLinks = new Elements();
+        Elements mockLogoImgs = new Elements();
+        Element mockImgElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockEmptyIconLinks);
+        when(mockDoc.select("img[alt*=logo], img[id*=logo]")).thenReturn(mockLogoImgs);
+        when(mockImgElement.absUrl("src")).thenReturn(TEST_BASE_URL + "id_logo.jpg");
+        mockLogoImgs.add(mockImgElement);
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "id_logo.jpg", logoUrl);
+    }
+
+    @Test
+    void extractLogoUrl_findsImgClassLogo() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockEmptyIconLinks = new Elements();
+        Elements mockEmptyAltIdLogoImgs = new Elements();
+        Elements mockClassLogoImgs = new Elements();
+        Element mockImgElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockEmptyIconLinks);
+        when(mockDoc.select("img[alt*=logo], img[id*=logo]")).thenReturn(mockEmptyAltIdLogoImgs);
+        when(mockDoc.select("img[class*=logo]")).thenReturn(mockClassLogoImgs);
+        when(mockImgElement.absUrl("src")).thenReturn(TEST_BASE_URL + "class_logo.gif");
+        mockClassLogoImgs.add(mockImgElement);
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "class_logo.gif", logoUrl);
+    }
+
+    @Test
+    void extractLogoUrl_prioritizesLinkIconOverImg() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockIconLinks = new Elements();
+        Element mockLinkElement = mock(Element.class);
+        Elements mockLogoImgs = new Elements(); // Should not be called if link icon is found
+        Element mockImgElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockIconLinks);
+        when(mockLinkElement.absUrl("href")).thenReturn(TEST_BASE_URL + "icon.png");
+        mockIconLinks.add(mockLinkElement);
+
+        // These shouldn't be used if the <link> tag is found first
+        // when(mockDoc.select("img[alt*=logo], img[id*=logo]")).thenReturn(mockLogoImgs);
+        // when(mockImgElement.absUrl("src")).thenReturn(TEST_BASE_URL + "alt_logo.png");
+        // mockLogoImgs.add(mockImgElement);
+
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "icon.png", logoUrl);
+        verify(mockDoc, times(1)).select("link[rel=icon], link[rel~=(?i)shortcut icon]");
+        verify(mockDoc, never()).select("img[alt*=logo], img[id*=logo]");
+    }
+
+
+    @Test
+    void extractLogoUrl_faviconCheckNotImplementedInUnit() throws Exception {
+        // Testing the /favicon.ico check is difficult in a pure unit test without mocking HttpURLConnection.
+        // This test acknowledges that this part of extractLogoUrl is not covered by existing unit tests directly for the HTTP call.
+        // We'll assume the HTML parsing paths are covered.
+        Document mockDoc = mock(Document.class);
+        when(mockDoc.select(anyString())).thenReturn(new Elements()); // Return empty for all selectors
+
+        // We cannot easily mock 'new URL(...).openConnection()' without PowerMockito or refactoring.
+        // So, this test will show that if no HTML logos are found, it returns null.
+        // The actual HTTP check for favicon.ico is an integration point.
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertNull(logoUrl, "Expected null when no logo is found in HTML and favicon check is not mocked for success");
+    }
+
+
+    @Test
+    void extractLogoUrl_noLogoFound() throws Exception {
+        Document mockDoc = mock(Document.class);
+        when(mockDoc.select(anyString())).thenReturn(new Elements()); // All select calls return empty Elements
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertNull(logoUrl);
+    }
+
+    @Test
+    void extractLogoUrl_relativeUrlConversion() throws Exception {
+        Document mockDoc = mock(Document.class);
+        Elements mockIconLinks = new Elements();
+        Element mockLinkElement = mock(Element.class);
+
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockIconLinks);
+        // absUrl is mocked to return the already absolute URL
+        when(mockLinkElement.absUrl("href")).thenReturn(TEST_BASE_URL + "relative/icon.png");
+        mockIconLinks.add(mockLinkElement);
+
+        String logoUrl = invokePrivateMethod(colorExtractionService, "extractLogoUrl", new Class[]{Document.class, String.class}, new Object[]{mockDoc, TEST_BASE_URL});
+        assertEquals(TEST_BASE_URL + "relative/icon.png", logoUrl);
+    }
+
+    // Tests for addOrUpdateColorFrequency
+    @Test
+    void addOrUpdateColorFrequency_newColor() throws Exception {
+        Map<String, com.example.colorschemeidentifier.model.ColorFrequencyInfo> colorFrequencies = new HashMap<>();
+        ColorInfo newColor = new ColorInfo("#FF0000", "rgb(255,0,0)", "Red", "test_source", false);
+
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency",
+                new Class[]{Map.class, ColorInfo.class},
+                new Object[]{colorFrequencies, newColor});
+
+        assertEquals(1, colorFrequencies.size());
+        assertTrue(colorFrequencies.containsKey("#FF0000"));
+        assertEquals(1, colorFrequencies.get("#FF0000").getFrequency());
+        assertFalse(colorFrequencies.get("#FF0000").getColorInfo().isLogoColor());
+    }
+
+    @Test
+    void addOrUpdateColorFrequency_existingColor_becomesLogoColor() throws Exception {
+        Map<String, com.example.colorschemeidentifier.model.ColorFrequencyInfo> colorFrequencies = new HashMap<>();
+        ColorInfo existingColor = new ColorInfo("#00FF00", "rgb(0,255,0)", "Lime", "image:someimage.png", false);
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency", new Class[]{Map.class, ColorInfo.class}, new Object[]{colorFrequencies, existingColor});
+
+        assertFalse(colorFrequencies.get("#00FF00").getColorInfo().isLogoColor());
+        assertEquals("image:someimage.png", colorFrequencies.get("#00FF00").getColorInfo().getSource());
+
+
+        ColorInfo logoColor = new ColorInfo("#00FF00", "rgb(0,255,0)", "Lime", "logo:thelogo.png", true);
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency", new Class[]{Map.class, ColorInfo.class}, new Object[]{colorFrequencies, logoColor});
+
+        assertEquals(1, colorFrequencies.size()); // Still one distinct color
+        assertTrue(colorFrequencies.containsKey("#00FF00"));
+        assertEquals(2, colorFrequencies.get("#00FF00").getFrequency()); // Frequency incremented
+        assertTrue(colorFrequencies.get("#00FF00").getColorInfo().isLogoColor(), "Color should now be marked as logo color");
+        assertEquals("logo:thelogo.png", colorFrequencies.get("#00FF00").getColorInfo().getSource(), "Source should be updated to logo source");
+    }
+
+    @Test
+    void addOrUpdateColorFrequency_existingLogoColor_staysLogoColor() throws Exception {
+        Map<String, com.example.colorschemeidentifier.model.ColorFrequencyInfo> colorFrequencies = new HashMap<>();
+        ColorInfo logoColor = new ColorInfo("#0000FF", "rgb(0,0,255)", "Blue", "logo:thelogo.png", true);
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency", new Class[]{Map.class, ColorInfo.class}, new Object[]{colorFrequencies, logoColor});
+
+        assertTrue(colorFrequencies.get("#0000FF").getColorInfo().isLogoColor());
+
+        ColorInfo sameColorNotLogo = new ColorInfo("#0000FF", "rgb(0,0,255)", "Blue", "image:another.png", false);
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency", new Class[]{Map.class, ColorInfo.class}, new Object[]{colorFrequencies, sameColorNotLogo});
+
+        assertEquals(1, colorFrequencies.size());
+        assertTrue(colorFrequencies.get("#0000FF").getColorInfo().isLogoColor(), "Color should remain logo color");
+        assertEquals(2, colorFrequencies.get("#0000FF").getFrequency());
+        assertEquals("logo:thelogo.png", colorFrequencies.get("#0000FF").getColorInfo().getSource(), "Source should remain logo source");
+    }
+
+    @Test
+    void addOrUpdateColorFrequency_colorByNameThenHex_updatesDetails() throws Exception {
+        Map<String, com.example.colorschemeidentifier.model.ColorFrequencyInfo> colorFrequencies = new HashMap<>();
+        // ColorNamer knows "red" maps to #FF0000
+        ColorInfo namedColor = new ColorInfo(null, null, "red", "css:style.css", false);
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency", new Class[]{Map.class, ColorInfo.class}, new Object[]{colorFrequencies, namedColor});
+
+        // Key should be #FF0000 (from ColorNamer)
+        assertTrue(colorFrequencies.containsKey("#FF0000"));
+        assertEquals("Red", colorFrequencies.get("#FF0000").getColorInfo().getName()); // Canonical name
+        assertNull(colorFrequencies.get("#FF0000").getColorInfo().getRgbValue(), "RGB should be null initially as it was added by name");
+
+        ColorInfo hexColor = new ColorInfo("#FF0000", "rgb(255,0,0)", "Red", "inline", false);
+        invokePrivateMethod(colorExtractionService, "addOrUpdateColorFrequency", new Class[]{Map.class, ColorInfo.class}, new Object[]{colorFrequencies, hexColor});
+
+        assertEquals(1, colorFrequencies.size());
+        assertEquals(2, colorFrequencies.get("#FF0000").getFrequency());
+        assertEquals("rgb(255,0,0)", colorFrequencies.get("#FF0000").getColorInfo().getRgbValue(), "RGB value should be updated");
+    }
+
+
     @Test
     void extractColorsFromUrl_ioException() throws IOException {
+        // This test remains largely the same, ensuring logo extraction doesn't break it.
         try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class)) {
             Connection mockConnection = mock(Connection.class);
             mockedJsoup.when(() -> Jsoup.connect(anyString())).thenReturn(mockConnection);
@@ -269,38 +511,121 @@ public class ColorExtractionServiceTest {
             // System.err.println("Exception during mock setup for image test: " + e);
             // e.printStackTrace();
         }
-        // This test as a full flow is complex. See testExtractDominantColorsDirectly for unit testing the image logic.
+            // This test as a full flow is complex. See testExtractDominantColorsDirectlyInternal for unit testing the image logic.
          assertTrue(true, "Image processing flow test is partially implemented and needs review/refactor for full unit testing of download part.");
     }
 
     @Test
-    void testExtractDominantColorsDirectly() {
-        // Create a 3x1 BufferedImage: Red, Green, Red
-        // Quantized Red: #CC3333 (approx from java.awt.Color.RED which is 255,0,0)
-        // Quantized Green: #339933 (approx from java.awt.Color.GREEN which is 0,255,0)
-        // Expected names from ColorNamer for these approximations might be tricky if they don't map back perfectly.
-        // The current quantization: bucketSize = 64.
-        // Red (255,0,0) -> qR=(255/64)*64+32 = 192+32=224. qG=32. qB=32. -> #E02020
-        // Green (0,255,0) -> qR=32, qG=224, qB=32 -> #20E020
+    void extractColorsFromUrl_withLogoProcessing() throws IOException {
+        Document mockDoc = mock(Document.class);
+        String logoImageUrl = TEST_BASE_URL + "logo.png";
 
+        // Setup mockDoc for extractLogoUrl to find the logoImageUrl
+        Elements mockIconLinks = new Elements();
+        Element mockLinkElement = mock(Element.class);
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenReturn(mockIconLinks);
+        when(mockLinkElement.absUrl("href")).thenReturn(logoImageUrl);
+        mockIconLinks.add(mockLinkElement);
+
+        // No other colors from styles or other images
+        when(mockDoc.select("[style]")).thenReturn(new Elements());
+        when(mockDoc.select("link[rel=stylesheet]")).thenReturn(new Elements());
+        when(mockDoc.select("style")).thenReturn(new Elements());
+        when(mockDoc.select("img[src]")).thenReturn(new Elements()); // No general images
+        when(mockDoc.baseUri()).thenReturn(TEST_BASE_URL);
+
+
+        BufferedImage mockLogoImage = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        mockLogoImage.setRGB(0, 0, java.awt.Color.BLUE.getRGB()); // Blue (0,0,255) -> Quantized to #2020E0
+
+        try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class);
+             MockedStatic<ImageIO> mockedImageIO = Mockito.mockStatic(ImageIO.class)) {
+
+            // Mock Jsoup.connect for the main page
+            Connection mockMainConnection = mock(Connection.class);
+            mockedJsoup.when(() -> Jsoup.connect(TEST_URL)).thenReturn(mockMainConnection);
+            when(mockMainConnection.timeout(anyInt())).thenReturn(mockMainConnection);
+            when(mockMainConnection.get()).thenReturn(mockDoc);
+
+            // Mock HttpURLConnection for the logo image download
+            HttpURLConnection mockLogoHttpURLConnection = mock(HttpURLConnection.class);
+            // We need to mock 'new URL(logoImageUrl).openConnection()' returning this. This is hard.
+            // Instead, we rely on the fact that openConnectionAndGetStream will be called,
+            // and we mock ImageIO.read to return the image if any InputStream is passed.
+            // This is a simplification. A more robust test would mock the URL.openConnection() call.
+            // For this test, we will assume the stream is correctly obtained and ImageIO.read is the key.
+
+            // When ImageIO.read is called (presumably with the stream from logoImageUrl), return mockLogoImage
+            // This mock is broad; if other images were processed, it would also return mockLogoImage for them.
+            // For this specific test, it's okay as only the logo is "downloaded".
+            ByteArrayInputStream mockInputStream = new ByteArrayInputStream(new byte[0]); // Dummy stream
+
+            // This part is tricky. The service calls `new URL(imageUrlStr).openConnection()`.
+            // To avoid PowerMockito, we'd typically refactor the service to allow injecting a URLConnectionFactory or similar.
+            // Given the current structure, a full end-to-end mock of image download is hard.
+            // The `extractColorsFromLogoImage` method uses `openConnectionAndGetStream`.
+            // We can mock `ImageIO.read` to return the desired image when any InputStream is provided,
+            // but we can't easily ensure it's the *correct* InputStream from the *correct* URL without more advanced mocking or refactoring.
+
+            // For now, let's assume that if extractLogoUrl returns a URL, extractColorsFromLogoImage will attempt to read it.
+            // We will make ImageIO.read return our mock image.
+            mockedImageIO.when(() -> ImageIO.read(any(InputStream.class))).thenReturn(mockLogoImage);
+
+
+            List<ColorInfo> results = colorExtractionService.extractColorsFromUrl(TEST_URL);
+
+            assertNotNull(results);
+            assertEquals(1, results.size());
+            ColorInfo logoColor = results.get(0);
+            assertEquals("#2020E0", logoColor.getHexValue()); // Quantized Blue
+            assertTrue(logoColor.isLogoColor());
+            assertEquals("logo:" + logoImageUrl, logoColor.getSource());
+
+        }
+    }
+
+
+    // Renamed to reflect it tests the internal algorithm if made accessible
+    @Test
+    void testExtractDominantColorsDirectlyInternal_logic() throws Exception {
         BufferedImage image = new BufferedImage(3, 1, BufferedImage.TYPE_INT_ARGB);
         image.setRGB(0, 0, new java.awt.Color(255, 0, 0).getRGB());   // Red
         image.setRGB(1, 0, new java.awt.Color(0, 255, 0).getRGB());   // Green
         image.setRGB(2, 0, new java.awt.Color(255, 0, 0).getRGB());   // Red
 
-        // Use reflection to test the private method or make it package-private for testing.
-        // For now, let's assume we can't change its visibility.
-        // This means we'd typically test it via the public method that calls it,
-        // which leads back to mocking the image loading.
-        // However, for true unit testing of the algorithm, if it were public/package-private:
-        // Map<String, ColorFrequencyInfo> colorFrequencies = new HashMap<>();
-        // colorExtractionService.extractDominantColorsFromImage(image, colorFrequencies, "test_image.png");
-        // assertEquals(2, colorFrequencies.size());
-        // assertTrue(colorFrequencies.containsKey("#E02020")); // Approx Red
-        // assertEquals(2, colorFrequencies.get("#E02020").getFrequency());
-        // assertTrue(colorFrequencies.containsKey("#20E020")); // Approx Green
-        // assertEquals(1, colorFrequencies.get("#20E020").getFrequency());
-        assertTrue(true, "Direct test of extractDominantColorsFromImage algorithm would require making it accessible or further refactoring.");
+        Map<String, com.example.colorschemeidentifier.model.ColorFrequencyInfo> colorFrequencies = new HashMap<>();
+
+        // Expected quantized colors based on bucketSize = 64:
+        // Red (255,0,0) -> qR=224, qG=32, qB=32 -> #E02020
+        // Green (0,255,0) -> qR=32, qG=224, qB=32 -> #20E020
+
+        // Test for non-logo image
+        invokePrivateMethod(colorExtractionService, "extractDominantColorsFromImageInternal",
+                new Class[]{BufferedImage.class, Map.class, String.class, boolean.class},
+                new Object[]{image, colorFrequencies, "test_image.png", false});
+
+        assertEquals(2, colorFrequencies.size());
+        assertTrue(colorFrequencies.containsKey("#E02020"));
+        assertEquals(2, colorFrequencies.get("#E02020").getFrequency());
+        assertFalse(colorFrequencies.get("#E02020").getColorInfo().isLogoColor());
+        assertEquals("image:test_image.png", colorFrequencies.get("#E02020").getColorInfo().getSource());
+
+
+        assertTrue(colorFrequencies.containsKey("#20E020"));
+        assertEquals(1, colorFrequencies.get("#20E020").getFrequency());
+        assertFalse(colorFrequencies.get("#20E020").getColorInfo().isLogoColor());
+        assertEquals("image:test_image.png", colorFrequencies.get("#20E020").getColorInfo().getSource());
+
+        // Test for logo image
+        colorFrequencies.clear();
+        invokePrivateMethod(colorExtractionService, "extractDominantColorsFromImageInternal",
+                new Class[]{BufferedImage.class, Map.class, String.class, boolean.class},
+                new Object[]{image, colorFrequencies, "logo_image.png", true});
+
+        assertTrue(colorFrequencies.get("#E02020").getColorInfo().isLogoColor());
+        assertEquals("logo:logo_image.png", colorFrequencies.get("#E02020").getColorInfo().getSource());
+        assertTrue(colorFrequencies.get("#20E020").getColorInfo().isLogoColor());
+        assertEquals("logo:logo_image.png", colorFrequencies.get("#20E020").getColorInfo().getSource());
     }
 
 
@@ -324,7 +649,7 @@ public class ColorExtractionServiceTest {
         Elements emptyElements = new Elements();
         when(mockDoc.select("img[src]")).thenReturn(emptyElements);
         when(mockDoc.select("link[rel=stylesheet]")).thenReturn(emptyElements);
-        when(mockDoc.select("style]")).thenReturn(emptyElements); // Corrected selector
+        when(mockDoc.select("style")).thenReturn(emptyElements); // Corrected selector for style tags
 
         try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class)) {
             Connection mockConnection = mock(Connection.class);
@@ -363,7 +688,7 @@ public class ColorExtractionServiceTest {
         Elements emptyElements = new Elements();
         when(mockDoc.select("img[src]")).thenReturn(emptyElements);
         when(mockDoc.select("link[rel=stylesheet]")).thenReturn(emptyElements);
-        when(mockDoc.select("style]")).thenReturn(emptyElements);
+        when(mockDoc.select("style")).thenReturn(emptyElements);
 
         try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class)) {
             Connection mockConnection = mock(Connection.class);
