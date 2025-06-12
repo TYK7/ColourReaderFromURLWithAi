@@ -588,7 +588,7 @@ public class ColorExtractionServiceTest {
     // Renamed to reflect it tests the internal algorithm if made accessible
     @Test
     void testExtractDominantColorsDirectlyInternal_logic() throws Exception {
-        BufferedImage image = new BufferedImage(3, 1, BufferedImage.TYPE_INT_ARGB);
+        BufferedImage image = new BufferedImage(3, 1, BufferedImage.TYPE_INT_ARGB); // A sample image
         image.setRGB(0, 0, new java.awt.Color(255, 0, 0).getRGB());   // Red
         image.setRGB(1, 0, new java.awt.Color(0, 255, 0).getRGB());   // Green
         image.setRGB(2, 0, new java.awt.Color(255, 0, 0).getRGB());   // Red
@@ -628,6 +628,150 @@ public class ColorExtractionServiceTest {
         assertEquals("logo:logo_image.png", colorFrequencies.get("#20E020").getColorInfo().getSource());
     }
 
+    // Helper method to create a dummy BufferedImage
+    private BufferedImage createDummyImage(int width, int height, int color) {
+        BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                img.setRGB(x, y, color);
+            }
+        }
+        return img;
+    }
+
+    private void setupMockDocumentForLogoUrl(Document mockDoc, String logoUrlToReturn) {
+        when(mockDoc.select("link[rel=icon], link[rel~=(?i)shortcut icon]")).thenAnswer(inv -> {
+            Elements mockIconLinks = new Elements();
+            Element mockLinkElement = mock(Element.class);
+            when(mockLinkElement.absUrl("href")).thenReturn(logoUrlToReturn);
+            mockIconLinks.add(mockLinkElement);
+            return mockIconLinks;
+        });
+        when(mockDoc.baseUri()).thenReturn(TEST_BASE_URL);
+        // Prevent other extractions by returning empty elements for other selectors
+        when(mockDoc.select(not(eq("link[rel=icon], link[rel~=(?i)shortcut icon]")))).thenReturn(new Elements());
+    }
+
+    @Test
+    void icoLogo_DecodedByCommonsImaging_Success() throws IOException {
+        String logoUrl = TEST_BASE_URL + "logo.ico";
+        Document mockDoc = mock(Document.class);
+        setupMockDocumentForLogoUrl(mockDoc, logoUrl);
+        BufferedImage mockIcoImage = createDummyImage(1,1, java.awt.Color.GREEN.getRGB()); // Green -> #20E020
+
+        try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class);
+             MockedStatic<org.apache.commons.imaging.Imaging> mockedImaging = Mockito.mockStatic(org.apache.commons.imaging.Imaging.class);
+             MockedStatic<ImageIO> mockedImageIO = Mockito.mockStatic(ImageIO.class)) {
+
+            Connection mockMainConnection = mock(Connection.class);
+            mockedJsoup.when(() -> Jsoup.connect(TEST_URL)).thenReturn(mockMainConnection);
+            when(mockMainConnection.timeout(anyInt())).thenReturn(mockMainConnection);
+            when(mockMainConnection.get()).thenReturn(mockDoc);
+
+            mockedImaging.when(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)))
+                         .thenReturn(mockIcoImage);
+            mockedImageIO.when(() -> ImageIO.read(any(InputStream.class))).thenThrow(new AssertionError("ImageIO.read should not be called"));
+
+            List<ColorInfo> result = colorExtractionService.extractColorsFromUrl(TEST_URL);
+
+            assertEquals(1, result.size());
+            assertEquals("#20E020", result.get(0).getHexValue()); // Quantized Green
+            assertTrue(result.get(0).isLogoColor());
+            assertEquals("logo:" + logoUrl, result.get(0).getSource());
+            mockedImaging.verify(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)), times(1));
+            mockedImageIO.verify(() -> ImageIO.read(any(InputStream.class)), never());
+        }
+    }
+
+    @Test
+    void icoLogo_CommonsImagingFails_ImageIOSucceeds() throws IOException {
+        String logoUrl = TEST_BASE_URL + "favicon.ico";
+        Document mockDoc = mock(Document.class);
+        setupMockDocumentForLogoUrl(mockDoc, logoUrl);
+        BufferedImage mockFallbackImage = createDummyImage(1,1, java.awt.Color.RED.getRGB()); // Red -> #E02020
+
+
+        try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class);
+             MockedStatic<org.apache.commons.imaging.Imaging> mockedImaging = Mockito.mockStatic(org.apache.commons.imaging.Imaging.class);
+             MockedStatic<ImageIO> mockedImageIO = Mockito.mockStatic(ImageIO.class)) {
+
+            Connection mockMainConnection = mock(Connection.class);
+            mockedJsoup.when(() -> Jsoup.connect(TEST_URL)).thenReturn(mockMainConnection);
+            when(mockMainConnection.timeout(anyInt())).thenReturn(mockMainConnection);
+            when(mockMainConnection.get()).thenReturn(mockDoc);
+
+            mockedImaging.when(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)))
+                         .thenThrow(new org.apache.commons.imaging.ImageReadException("Commons Imaging test error"));
+            mockedImageIO.when(() -> ImageIO.read(any(InputStream.class)))
+                         .thenReturn(mockFallbackImage);
+
+            List<ColorInfo> result = colorExtractionService.extractColorsFromUrl(TEST_URL);
+
+            assertEquals(1, result.size());
+            assertEquals("#E02020", result.get(0).getHexValue()); // Quantized Red
+            assertTrue(result.get(0).isLogoColor());
+            mockedImaging.verify(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)), times(1));
+            mockedImageIO.verify(() -> ImageIO.read(any(InputStream.class)), times(1));
+        }
+    }
+
+    @Test
+    void icoLogo_CommonsImagingFails_ImageIOFails() throws IOException {
+        String logoUrl = TEST_BASE_URL + "another.ico";
+        Document mockDoc = mock(Document.class);
+        setupMockDocumentForLogoUrl(mockDoc, logoUrl);
+
+        try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class);
+             MockedStatic<org.apache.commons.imaging.Imaging> mockedImaging = Mockito.mockStatic(org.apache.commons.imaging.Imaging.class);
+             MockedStatic<ImageIO> mockedImageIO = Mockito.mockStatic(ImageIO.class)) {
+
+            Connection mockMainConnection = mock(Connection.class);
+            mockedJsoup.when(() -> Jsoup.connect(TEST_URL)).thenReturn(mockMainConnection);
+            when(mockMainConnection.timeout(anyInt())).thenReturn(mockMainConnection);
+            when(mockMainConnection.get()).thenReturn(mockDoc);
+
+            mockedImaging.when(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)))
+                         .thenThrow(new org.apache.commons.imaging.ImageReadException("Commons Imaging test error"));
+            mockedImageIO.when(() -> ImageIO.read(any(InputStream.class)))
+                         .thenReturn(null); // ImageIO.read returns null for failure
+
+            List<ColorInfo> result = colorExtractionService.extractColorsFromUrl(TEST_URL);
+
+            assertTrue(result.isEmpty(), "No colors should be extracted if logo decoding fails completely.");
+            mockedImaging.verify(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)), times(1));
+            mockedImageIO.verify(() -> ImageIO.read(any(InputStream.class)), times(1));
+        }
+    }
+
+    @Test
+    void pngLogo_DecodedByImageIO_CommonsImagingSkipped() throws IOException {
+        String logoUrl = TEST_BASE_URL + "logo.png"; // Non-ICO
+        Document mockDoc = mock(Document.class);
+        setupMockDocumentForLogoUrl(mockDoc, logoUrl);
+        BufferedImage mockPngImage = createDummyImage(1,1, java.awt.Color.CYAN.getRGB()); // Cyan -> #20E0E0
+
+        try (MockedStatic<Jsoup> mockedJsoup = Mockito.mockStatic(Jsoup.class);
+             MockedStatic<org.apache.commons.imaging.Imaging> mockedImaging = Mockito.mockStatic(org.apache.commons.imaging.Imaging.class);
+             MockedStatic<ImageIO> mockedImageIO = Mockito.mockStatic(ImageIO.class)) {
+
+            Connection mockMainConnection = mock(Connection.class);
+            mockedJsoup.when(() -> Jsoup.connect(TEST_URL)).thenReturn(mockMainConnection);
+            when(mockMainConnection.timeout(anyInt())).thenReturn(mockMainConnection);
+            when(mockMainConnection.get()).thenReturn(mockDoc);
+
+            mockedImageIO.when(() -> ImageIO.read(any(InputStream.class)))
+                         .thenReturn(mockPngImage);
+
+            List<ColorInfo> result = colorExtractionService.extractColorsFromUrl(TEST_URL);
+
+            assertEquals(1, result.size());
+            assertEquals("#20E0E0", result.get(0).getHexValue()); // Quantized Cyan
+            assertTrue(result.get(0).isLogoColor());
+            // Commons Imaging should not be called for a .png
+            mockedImaging.verify(() -> org.apache.commons.imaging.Imaging.getBufferedImage(any(InputStream.class)), never());
+            mockedImageIO.verify(() -> ImageIO.read(any(InputStream.class)), times(1));
+        }
+    }
 
     @Test
     void testFrequencyCountingAndTopN() throws IOException {

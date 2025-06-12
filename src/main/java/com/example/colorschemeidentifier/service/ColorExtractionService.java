@@ -10,9 +10,13 @@ import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.apache.commons.imaging.Imaging;
+import org.apache.commons.imaging.ImageReadException;
+
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 // import java.io.ByteArrayOutputStream; // No longer strictly needed after refactor
 import java.io.IOException;
 import java.io.InputStream;
@@ -448,30 +452,91 @@ public class ColorExtractionService {
         String sourceIdentifier = logoUrl.startsWith("data:image")
                 ? "logo_data_uri:" + logoUrl.substring(0, Math.min(logoUrl.length(), 50)) + "..."
                 : "logo:" + logoUrl;
+
+        InputStream imageStream = null;
+        BufferedImage image = null;
+
         try {
-            InputStream imageStream = logoUrl.startsWith("data:image")
-                    ? processDataUriGetStream(logoUrl, sourceIdentifier)
-                    : openConnectionAndGetStream(logoUrl);
+            boolean isIcoByExtension = logoUrl.toLowerCase().endsWith(".ico");
+            String dataUriMimeType = null;
+            if (logoUrl.startsWith("data:image/")) {
+                int mimeEnd = logoUrl.indexOf(';');
+                if (mimeEnd > 0) {
+                    dataUriMimeType = logoUrl.substring(5, mimeEnd).toLowerCase();
+                }
+            }
+            boolean isIcoByMime = "image/x-icon".equals(dataUriMimeType) || "image/vnd.microsoft.icon".equals(dataUriMimeType);
+
+            imageStream = logoUrl.startsWith("data:image")
+                    ? processDataUriGetStream(logoUrl, sourceIdentifier) // This returns ByteArrayInputStream
+                    : openConnectionAndGetStream(logoUrl); // This returns HttpInputStream
 
             if (imageStream == null) {
                 logger.warn("Could not get input stream for logo URL: {}", logoUrl);
                 return;
             }
 
-            try (InputStream in = imageStream) { // Ensure stream is closed
-                BufferedImage image = ImageIO.read(in);
-                if (image != null) {
-                    logger.info("Processing logo image: {}", sourceIdentifier);
-                    // Calls the internal method, setting isLogoColor to true
-                    extractDominantColorsFromImageInternal(image, colorFrequencies, sourceIdentifier, true);
-                } else {
-                    logger.warn("Could not decode logo image from source: {}", sourceIdentifier);
+            // For ICO, we need to buffer the stream if it's not already a ByteArrayInputStream,
+            // because Apache Commons Imaging might need to read it multiple times or it might not support mark/reset on HttpInputStream.
+            // ImageIO.read also benefits from a resettable stream for some formats.
+            if (!imageStream.markSupported()) {
+                imageStream = new ByteArrayInputStream(imageStream.readAllBytes());
+            }
+            imageStream.mark(Integer.MAX_VALUE); // Mark the beginning of the stream
+
+
+            if (isIcoByExtension || isIcoByMime) {
+                logger.info("Attempting to decode ICO logo with Apache Commons Imaging: {}", sourceIdentifier);
+                try {
+                    image = Imaging.getBufferedImage(imageStream);
+                    logger.info("Successfully decoded ICO logo with Apache Commons Imaging: {}", sourceIdentifier);
+                } catch (ImageReadException | IOException imagingEx) {
+                    logger.warn("Apache Commons Imaging failed to decode logo ({}): {}. Attempting fallback to ImageIO.", sourceIdentifier, imagingEx.getMessage());
+                    imageStream.reset(); // Reset stream for ImageIO
+                    try {
+                        image = ImageIO.read(imageStream);
+                        if (image != null) {
+                             logger.info("Successfully decoded ICO logo with ImageIO fallback: {}", sourceIdentifier);
+                        } else {
+                            logger.warn("ImageIO fallback also failed to decode ICO logo: {}", sourceIdentifier);
+                        }
+                    } catch (IOException imageIoEx) {
+                        logger.warn("ImageIO fallback failed with IOException for ICO logo ({}): {}", sourceIdentifier, imageIoEx.getMessage());
+                    }
+                }
+            } else {
+                logger.info("Attempting to decode non-ICO logo with ImageIO: {}", sourceIdentifier);
+                try {
+                    image = ImageIO.read(imageStream);
+                     if (image != null) {
+                        logger.info("Successfully decoded non-ICO logo with ImageIO: {}", sourceIdentifier);
+                    } else {
+                        // This case is important: ImageIO.read can return null for unsupported formats without throwing an exception.
+                        logger.warn("ImageIO.read returned null for logo (likely unsupported format or corrupt image): {}", sourceIdentifier);
+                    }
+                } catch (IOException imageIoEx) {
+                     logger.warn("ImageIO failed to decode non-ICO logo ({}) with IOException: {}", sourceIdentifier, imageIoEx.getMessage());
                 }
             }
-        } catch (IOException e) {
-            logger.error("Error reading logo image stream for {}: {}", sourceIdentifier, e.getMessage());
-        } catch (Exception e) {
+
+            if (image != null) {
+                extractDominantColorsFromImageInternal(image, colorFrequencies, sourceIdentifier, true);
+            } else {
+                logger.warn("Could not decode logo image from source (all attempts failed): {}", sourceIdentifier);
+            }
+
+        } catch (IOException e) { // Catches IO errors from stream opening or readAllBytes
+            logger.error("IOException during logo image processing for {}: {}", sourceIdentifier, e.getMessage());
+        } catch (Exception e) { // Catches other unexpected errors
             logger.error("An unexpected error occurred while processing logo image {}: {}", sourceIdentifier, e.getMessage(), e);
+        } finally {
+            if (imageStream != null) {
+                try {
+                    imageStream.close();
+                } catch (IOException e) {
+                    logger.error("Failed to close image stream for {}: {}", sourceIdentifier, e.getMessage());
+                }
+            }
         }
     }
 
